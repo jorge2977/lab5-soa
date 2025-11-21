@@ -51,17 +51,29 @@ class IntegrationApplication(
     fun evenChannel(): PublishSubscribeChannelSpec<*> = MessageChannels.publishSubscribe()
 
     /**
+     * Defines a publish-subscribe channel for odd numbers.
+     * Multiple subscribers can receive messages from this channel.
+     */
+    @Bean
+    fun oddChannel(): PublishSubscribeChannelSpec<*> = MessageChannels.publishSubscribe()
+
+    /**
+     * Input channel for the integration flow.
+     */
+    @Bean
+    fun inputChannel() =
+        org.springframework.integration.channel
+            .DirectChannel()
+
+    /**
      * Main integration flow that polls the integer source and routes messages.
      * Polls every 100ms and routes based on even/odd logic.
      */
     @Bean
-    fun myFlow(integerSource: AtomicInteger): IntegrationFlow =
-        integrationFlow(
-            source = { integerSource.getAndIncrement() },
-            options = { poller(Pollers.fixedRate(100)) },
-        ) {
+    fun myFlow(): IntegrationFlow =
+        integrationFlow("inputChannel") {
             transform { num: Int ->
-                logger.info("📥 Source generated number: {}", num)
+                logger.info("📥 Source received number: {}", num)
                 num
             }
             route { p: Int ->
@@ -96,7 +108,7 @@ class IntegrationApplication(
     fun oddFlow(): IntegrationFlow =
         integrationFlow("oddChannel") {
             filter { p: Int ->
-                val passes = p % 2 == 0
+                val passes = p % 2 != 0
                 logger.info("  🔍 Odd Filter: checking {} → {}", p, if (passes) "PASS" else "REJECT")
                 passes
             } // , { discardChannel("discardChannel") })
@@ -107,6 +119,15 @@ class IntegrationApplication(
             handle { p ->
                 logger.info("  ✅ Odd Handler: Processed [{}]", p.payload)
             }
+        }
+
+    @Bean
+    fun pollerFlow(integerSource: AtomicInteger): IntegrationFlow =
+        integrationFlow(
+            source = { integerSource.getAndIncrement() },
+            options = { poller(Pollers.fixedRate(100)) },
+        ) {
+            channel("inputChannel")
         }
 
     /**
@@ -150,7 +171,7 @@ class SomeService {
  */
 @MessagingGateway
 interface SendNumber {
-    @Gateway(requestChannel = "evenChannel")
+    @Gateway(requestChannel = "inputChannel")
     fun sendNumber(number: Int)
 }
 
